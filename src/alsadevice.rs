@@ -66,13 +66,13 @@ pub struct AlsaCaptureDevice {
 
 struct CaptureChannels {
     audio: mpsc::SyncSender<AudioMessage>,
-    status: mpsc::Sender<StatusMessage>,
+    status: crossbeam_channel::Sender<StatusMessage>,
     command: mpsc::Receiver<CommandMessage>,
 }
 
 struct PlaybackChannels {
     audio: mpsc::Receiver<AudioMessage>,
-    status: mpsc::Sender<StatusMessage>,
+    status: crossbeam_channel::Sender<StatusMessage>,
 }
 
 struct CaptureParams {
@@ -151,7 +151,11 @@ fn play_buffer(
     let frames_to_write = buffer.len() / bytes_per_frame;
     let mut retry_count: usize = 0;
     loop {
-        retry_count += 1; //TODO limit this to something sensible
+        retry_count += 1;
+        if retry_count >= 100 {
+            warn!("PB: giving up after {} write attempts", retry_count);
+            return Err(DeviceError::new("Aborting playback after too many write attempts").into());
+        }
         let timeout_millis = (2.0 * millis_per_frame * frames_to_write as f32) as u32;
         trace!(
             "PB: write try {}, pcmdevice.wait with timeout {} ms",
@@ -908,7 +912,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         &mut self,
         channel: mpsc::Receiver<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
@@ -983,7 +987,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         &mut self,
         channel: mpsc::SyncSender<AudioMessage>,
         barrier: Arc<Barrier>,
-        status_channel: mpsc::Sender<StatusMessage>,
+        status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: mpsc::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
